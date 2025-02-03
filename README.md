@@ -2,7 +2,7 @@
 
 ```bash
 docker-compose up
-open http://localhost:8085
+open http://localhost:8080
 ```
 
 This guide provides a step-by-step walkthrough for setting up a proof of concept that integrates Temporal with ScyllaDB, using ConnectRPC and Go to implement a complex workflow system.
@@ -24,7 +24,7 @@ Use the official ScyllaDB Docker image to start a ScyllaDB instance:
 
 ```yaml
 scylladb:
-  image: scylladb/scylla:latest
+  image: scylladb/scylla:6.2
   ports:
     - "9042:9042"
 ```
@@ -35,10 +35,10 @@ Configure Temporal to use ScyllaDB as its persistence layer:
 
 ```yaml
 temporal:
-  image: temporalio/auto-setup:latest
+  image: temporalio/auto-setup:1.26.2
   environment:
     - DB=cassandra
-    - CASSANDRA_SEEDS=scylladb  # Point to your ScyllaDB container
+    - CASSANDRA_SEEDS=scylladb
   ports:
     - "7233:7233"   # Temporal frontend port
 ```

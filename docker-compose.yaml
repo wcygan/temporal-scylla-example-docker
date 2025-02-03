@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3.5"
 
 # Define common healthcheck defaults using YAML anchors
 x-health-defaults: &health-defaults
@@ -10,31 +10,53 @@ x-health-defaults: &health-defaults
 # Define common environment variables for Temporal using Scylla as backend
 x-temporal-backend-scylla: &temporal-backend-scylla
   CASSANDRA_PORT: 9042
-  CASSANDRA_SEEDS: scylla
+  CASSANDRA_SEEDS: scylladb
 
 services:
-  scylla:
+  scylladb:
+    container_name: temporal-scylladb
     image: scylladb/scylla:6.2
-    container_name: scylla
+    networks:
+      - temporal-network
     ports:
-      - "9042:9042"       # CQL port for client connections
-      - "10000:10000"     # (Optional) additional port (e.g., for internals)
+      - "9042:9042"
     volumes:
       - scylla-data:/var/lib/scylla
-    healthcheck:
-      <<: *health-defaults
-      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE keyspaces;'"]
+
+  elasticsearch:
+    container_name: temporal-elasticsearch
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - xpack.security.enabled=false
+    image: elasticsearch:7.16.2
+    networks:
+      - temporal-network
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/var/lib/elasticsearch/data
 
   temporal:
     container_name: temporal
     depends_on:
-      scylla:
-        condition: service_healthy
+      - scylladb
+      - elasticsearch
     environment:
-      <<: *temporal-backend-scylla
-    image: temporalio/auto-setup:1.22
+      - DB=cassandra
+      - CASSANDRA_SEEDS=scylladb
+      - ENABLE_ES=true
+      - ES_SEEDS=elasticsearch
+      - ES_VERSION=v7
+    image: temporalio/auto-setup:1.26.2
+    networks:
+      - temporal-network
     ports:
-      - "7233:7233"  # Temporal gRPC frontend port
+      - "7233:7233"
 
   temporal-admin-tools:
     container_name: temporal-admin-tools
@@ -43,8 +65,9 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CLI_ADDRESS=temporal:7233
-      - TEMPORAL_CLI_SHOW_STACKS=1
-    image: temporalio/admin-tools:1.22
+    image: temporalio/admin-tools:1.26.2
+    networks:
+      - temporal-network
     stdin_open: true
     tty: true
 
@@ -55,10 +78,17 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
-      - TEMPORAL_CSRF_COOKIE_INSECURE=true
-    image: temporalio/ui:2.21.3
+    image: temporalio/ui:2.31.2
+    networks:
+      - temporal-network
     ports:
-      - "8085:8080"  # Access Temporal UI via http://localhost:8085
+      - "8080:8080"
+
+networks:
+  temporal-network:
+    driver: bridge
+    name: temporal-network
 
 volumes:
   scylla-data:
+  elasticsearch-data:

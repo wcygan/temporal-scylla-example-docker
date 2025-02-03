@@ -1,192 +1,96 @@
 # Temporal ScyllaDB Example with Docker
 
+## Quick Start
+
+Start all services:
+
 ```bash
-docker-compose up
-open http://localhost:8080
+docker-compose up --build
 ```
+
+The following services will be available:
+- Temporal UI: http://localhost:8080 (view the workflow history)
+- Workflow Server: http://localhost:8081 (start and check the workflow status)
+- ScyllaDB: localhost:9042 (view the data in the database)
+- Temporal: localhost:7233
+
+## Testing the Workflow Service
+
+### Install Testing Tools
+
+First, install the necessary tools:
+
+```bash
+brew install grpcurl
+brew install grpcui
+brew install cassandra
+```
+
+### Using grpcurl
+
+List available services:
+
+```bash
+grpcurl -plaintext localhost:8081 list
+```
+
+Start a workflow:
 
 ```bash
 grpcurl -plaintext -d '{
   "inputData": "foobar"
 }' localhost:8081 workflow.v1.WorkflowService.StartWorkflow
-{
-  "workflow_id": "workflow-6dad30bd-94e0-439a-8357-ebecb0dedcb2",
-  "run_id": "0bf123c0-e54f-4a34-a8c1-9fb9e1d26209"
-}
+```
 
+Check workflow status:
+
+```bash
 grpcurl -plaintext -d '{
   "workflowId": "workflow-6dad30bd-94e0-439a-8357-ebecb0dedcb2"
 }' localhost:8081 workflow.v1.WorkflowService.GetWorkflowStatus
-{
-  "status": "WORKFLOW_STATUS_COMPLETED",
-  "result": "processed: foobar",
-  "error": ""
-}
 ```
 
-This guide provides a step-by-step walkthrough for setting up a proof of concept that integrates Temporal with ScyllaDB, using ConnectRPC and Go to implement a complex workflow system.
+### Using grpcui
 
-## Overview
+Launch the interactive web UI:
 
-The system demonstrates:
-- ScyllaDB as the persistence layer for Temporal
-- ConnectRPC for API communication
-- A complex workflow implementation with four activities
-- Docker-based deployment
-- Buf for Protocol Buffer management
-
-## 1. Infrastructure Setup with Docker
-
-### ScyllaDB Container
-
-Use the official ScyllaDB Docker image to start a ScyllaDB instance:
-
-```yaml
-scylladb:
-  image: scylladb/scylla:6.2
-  ports:
-    - "9042:9042"
-```
-
-### Temporal Server Container
-
-Configure Temporal to use ScyllaDB as its persistence layer:
-
-```yaml
-temporal:
-  image: temporalio/auto-setup:1.26.2
-  environment:
-    - DB=cassandra
-    - CASSANDRA_SEEDS=scylladb
-  ports:
-    - "7233:7233"   # Temporal frontend port
-```
-
-## 2. API Definition with Protocol Buffers
-
-### Create Proto Schemas
-1. Define your RPC service in proto files (e.g., `proto/workflow.proto`)
-2. Include message definitions for data processing
-3. Define service endpoints for workflow interaction
-
-### Buf Integration
-1. Install Buf and configure with `buf.yaml`
-2. Generate language-specific stubs using `buf generate`
-3. Use generated code in your Go ConnectRPC server
-
-## 3. Go Service Implementation
-
-### ConnectRPC Server
-- Implement server using generated proto code
-- Register handlers for RPC endpoints
-- Handle workflow triggering requests
-
-### Temporal Client Integration
-- Initialize Temporal client in RPC handlers
-- Execute workflows using Temporal's SDK
-- Return workflow IDs or status in RPC responses
-
-## 4. Workflow Implementation
-
-### Workflow Structure
-The example implements a four-activity workflow:
-
-1. **Validate Input**: Data validation
-2. **Transform Data**: Data transformation
-3. **Enrich Data**: Data enrichment
-4. **Format Output**: Final formatting
-
-### Example Workflow Implementation
-
-```go
-func ComplexWorkflow(ctx workflow.Context, input string) (string, error) {
-    var err error
-    // Activity 1: Validate the input
-    err = workflow.ExecuteActivity(ctx, ValidateInputActivity, input).Get(ctx, nil)
-    if err != nil {
-        return "", err
-    }
-
-    // Activity 2: Transform the data
-    var transformed string
-    err = workflow.ExecuteActivity(ctx, TransformActivity, input).Get(ctx, &transformed)
-    if err != nil {
-        return "", err
-    }
-
-    // Activity 3: Enrich the data
-    var enriched string
-    err = workflow.ExecuteActivity(ctx, EnrichActivity, transformed).Get(ctx, &enriched)
-    if err != nil {
-        return "", err
-    }
-
-    // Activity 4: Format the final output
-    var output string
-    err = workflow.ExecuteActivity(ctx, FormatOutputActivity, enriched).Get(ctx, &output)
-    if err != nil {
-        return "", err
-    }
-    return output, nil
-}
-```
-
-## 5. Containerization
-
-### Dockerfile Requirements
-- Multi-stage build for Go binaries
-- Worker and server packaging
-- Alpine-based lightweight image
-- Exposed ports for ConnectRPC server
-
-### Docker Compose Configuration
-
-```yaml
-version: "3.8"
-services:
-  temporal:
-    image: temporalio/auto-setup:latest
-    environment:
-      - DB=cassandra
-      - CASSANDRA_SEEDS=scylladb
-    ports:
-      - "7233:7233"
-
-  scylladb:
-    image: scylladb/scylla:latest
-    ports:
-      - "9042:9042"
-
-  myservice:
-    build: .
-    ports:
-      - "8080:8080"
-    depends_on:
-      - temporal
-      - scylladb
-```
-
-## 6. Running the Application
-
-### Build and Deploy
 ```bash
-docker-compose up --build
+grpcui -plaintext localhost:8081
 ```
 
-### Testing
-1. Use HTTP clients (curl/Postman) to send requests to your ConnectRPC endpoint
-2. Example endpoint: `http://localhost:8080/temporal.TemporalService/StartWorkflow`
-3. Monitor logs from Temporal worker and server
-4. Verify activity execution order and output
+This will open a browser window where you can:
+1. Browse available services
+2. Execute RPCs interactively
+3. View request/response messages
+4. Test different input combinations
 
-## Summary
+### Using cqlsh
 
-This proof of concept demonstrates:
-- Container orchestration with Docker Compose
-- API definition and generation with Protocol Buffers and Buf
-- Go service implementation with ConnectRPC
-- Complex workflow implementation with Temporal
-- Integration with ScyllaDB for persistence
-- End-to-end testing and verification
+```bash
+docker exec -it temporal-scylladb cqlsh
 
-The system provides a foundation for building scalable, reliable workflow-based applications using modern cloud-native technologies.
+DESCRIBE KEYSPACES;
+USE temporal;
+DESCRIBE TABLES;
+SELECT * FROM executions LIMIT 10;
+
+SELECT workflow_id,
+       run_id,
+       visibility_ts,
+       execution_state,
+       workflow_last_write_version
+FROM executions
+LIMIT 5;
+
+SELECT shard_id,
+       type,
+       workflow_id,
+       run_id,
+       current_run_id,
+       execution_state
+FROM executions
+WHERE shard_id = 1
+LIMIT 5;
+
+exit;
+```

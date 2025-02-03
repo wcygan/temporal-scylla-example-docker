@@ -84,6 +84,24 @@ services:
     ports:
       - "8080:8080"
 
+  server:
+    container_name: temporal-workflow-server
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      - TEMPORAL_HOST=temporal
+      - TEMPORAL_PORT=7233
+    networks:
+      - temporal-network
+    ports:
+      - "8081:8081"
+    depends_on:
+      - temporal
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/healthz"]
+
 networks:
   temporal-network:
     driver: bridge

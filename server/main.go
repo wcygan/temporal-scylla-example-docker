@@ -22,6 +22,25 @@ import (
 	workflowv1pb "buf.build/gen/go/wcygan/temporal-scylla-example/protocolbuffers/go/workflow/v1"
 )
 
+// Global Temporal client instance.
+var temporalClient client.Client
+
+// newTemporalClient reads environment variables and returns a new Temporal client.
+func newTemporalClient() (client.Client, error) {
+	temporalHost := os.Getenv("TEMPORAL_HOST")
+	if temporalHost == "" {
+		temporalHost = "localhost"
+	}
+	temporalPort := os.Getenv("TEMPORAL_PORT")
+	if temporalPort == "" {
+		temporalPort = "7233"
+	}
+	temporalAddress := fmt.Sprintf("%s:%s", temporalHost, temporalPort)
+	return client.NewClient(client.Options{
+		HostPort: temporalAddress,
+	})
+}
+
 // workflowServiceServer implements the WorkflowService defined in our proto.
 type workflowServiceServer struct {
 	workflowv1connect.UnimplementedWorkflowServiceHandler
@@ -29,163 +48,134 @@ type workflowServiceServer struct {
 
 // StartWorkflow starts a new Temporal workflow and returns its identifiers.
 func (s *workflowServiceServer) StartWorkflow(ctx context.Context, req *connect.Request[workflowv1pb.StartWorkflowRequest]) (*connect.Response[workflowv1pb.StartWorkflowResponse], error) {
-	// Create a Temporal client.
-	temporalClient, err := client.NewClient(client.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to create Temporal client: %w", err)
-	}
-	defer temporalClient.Close()
-
 	// Set workflow options. Here we generate a unique ID.
 	workflowOptions := client.StartWorkflowOptions{
 		ID:        "workflow-" + uuid.NewString(),
 		TaskQueue: "data-processing-task-queue",
-		// You can add timeouts or retry options as needed.
 	}
-
-	// Start the workflow asynchronously.
 	we, err := temporalClient.ExecuteWorkflow(ctx, workflowOptions, DataProcessingWorkflow, req.Msg.InputData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start workflow: %w", err)
 	}
-
-	// Return the workflow and run IDs.
 	return connect.NewResponse(&workflowv1pb.StartWorkflowResponse{
 		WorkflowId: we.GetID(),
 		RunId:      we.GetRunID(),
 	}), nil
 }
 
-// GetWorkflowStatus checks if the workflow has finished and returns the result or error.
+// GetWorkflowStatus checks the workflow's completion status and returns the result.
 func (s *workflowServiceServer) GetWorkflowStatus(ctx context.Context, req *connect.Request[workflowv1pb.GetWorkflowStatusRequest]) (*connect.Response[workflowv1pb.GetWorkflowStatusResponse], error) {
-	temporalClient, err := client.NewClient(client.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to create Temporal client: %w", err)
-	}
-	defer temporalClient.Close()
-
-	// Obtain a handle to the workflow execution using its ID.
 	workflowHandle := temporalClient.GetWorkflow(ctx, req.Msg.WorkflowId, "")
 
 	var result string
-	// Get blocks until the workflow completes.
-	err = workflowHandle.Get(ctx, &result)
+	err := workflowHandle.Get(ctx, &result)
 	if err != nil {
-		// If Get() returns an error, for example because the workflow is still running,
-		// you can return a status of RUNNING. (In production, you might distinguish between "still running" and a real failure.)
+		// The workflow might still be running.
 		return connect.NewResponse(&workflowv1pb.GetWorkflowStatusResponse{
 			Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_RUNNING,
 		}), nil
 	}
 
-	// If no error, the workflow is completed successfully.
 	return connect.NewResponse(&workflowv1pb.GetWorkflowStatusResponse{
 		Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_COMPLETED,
 		Result: result,
 	}), nil
 }
 
-// DataProcessingWorkflow is a placeholder for your Temporal workflow definition.
-// This would normally be defined in its own package using Temporal's SDK.
+// DataProcessingWorkflow is a placeholder for your Temporal workflow.
 func DataProcessingWorkflow(ctx workflow.Context, input string) (string, error) {
-	// Example logic: call several activities in sequence.
-	// For brevity, we simply return a processed string.
 	return "processed: " + input, nil
 }
 
-// loggingInterceptor logs incoming requests
+// loggingInterceptor logs incoming requests.
 func loggingInterceptor() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			start := time.Now()
 			resp, err := next(ctx, req)
-			duration := time.Since(start)
-
-			// Log the request details
 			fmt.Printf("Request: %s, Duration: %v, Error: %v\n",
 				req.Spec().Procedure,
-				duration,
-				err,
-			)
-
+				time.Since(start),
+				err)
 			return resp, err
 		}
 	}
 }
 
+func connectToTemporal(maxRetries int, delay time.Duration) client.Client {
+	var temporalClient client.Client
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		temporalClient, err = newTemporalClient()
+		if err == nil {
+			fmt.Println("Successfully connected to Temporal server")
+			return temporalClient
+		}
+		fmt.Printf("Attempt %d: Failed to connect to Temporal server: %v\n", i+1, err)
+		time.Sleep(delay)
+	}
+
+	panic(fmt.Sprintf("unable to create Temporal client after %d attempts: %v", maxRetries, err))
+}
+
 func main() {
-	// Get port from environment or use default
+	// Get listen port from environment or use default 8081.
 	port := "8081"
 	if p := os.Getenv("PORT"); p != "" {
 		port = p
 	}
 
-	// Create a Temporal client
-	temporalClient, err := client.NewClient(client.Options{})
-	if err != nil {
-		panic(fmt.Sprintf("unable to create Temporal client: %v", err))
-	}
+	// Retry connecting to Temporal server (20 attempts, 3 seconds apart)
+	temporalClient = connectToTemporal(20, 3*time.Second)
 	defer temporalClient.Close()
 
-	// Set up a worker to listen on the task queue
-	w := worker.New(temporalClient, "data-processing-task-queue", worker.Options{})
-
-	// Register workflow and activities
-	w.RegisterWorkflow(DataProcessingWorkflow)
-
-	// Start the worker in a separate goroutine
+	// Set up Temporal worker.
+	workerInstance := worker.New(temporalClient, "data-processing-task-queue", worker.Options{})
+	workerInstance.RegisterWorkflow(DataProcessingWorkflow)
 	go func() {
-		err = w.Run(worker.InterruptCh())
+		err := workerInstance.Run(worker.InterruptCh())
 		if err != nil {
 			panic(fmt.Sprintf("unable to start worker: %v", err))
 		}
 	}()
 
-	// Create a new HTTP mux for routing
+	// Create HTTP multiplexer for ConnectRPC.
 	mux := http.NewServeMux()
-
-	// Common interceptors for all handlers
 	interceptors := connect.WithInterceptors(loggingInterceptor())
 
-	// Register the workflow service
 	workflowPath, workflowHandler := workflowv1connect.NewWorkflowServiceHandler(
 		&workflowServiceServer{},
 		interceptors,
 	)
 	mux.Handle(workflowPath, workflowHandler)
 
-	// Register health check service
 	healthPath, healthHandler := grpchealth.NewHandler(grpchealth.NewStaticChecker(), interceptors)
 	mux.Handle(healthPath, healthHandler)
 
-	// Register reflection service
 	reflector := grpcreflect.NewStaticReflector(
-		workflowv1connect.WorkflowServiceName, // Your service name
-		grpchealth.HealthV1ServiceName,        // Health service name
+		workflowv1connect.WorkflowServiceName,
+		grpchealth.HealthV1ServiceName,
 	)
 	reflectPath, reflectHandler := grpcreflect.NewHandlerV1(reflector)
 	mux.Handle(reflectPath, reflectHandler)
 
-	// Add a simple HTTP health check endpoint
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
 
-	// Wrap the mux with h2c for HTTP/2 support
 	h2cHandler := h2c.NewHandler(mux, &http2.Server{})
 
-	// Create the server
 	server := &http.Server{
 		Addr:              ":" + port,
 		Handler:           h2cHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1MB
+		MaxHeaderBytes:    1 << 20,
 	}
 
-	// Start the server
 	fmt.Printf("Starting server on :%s\n", port)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		panic(fmt.Sprintf("Failed to start server: %v", err))

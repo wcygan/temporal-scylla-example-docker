@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package workflow.v1;
+
+// Request to start a workflow execution.
+message StartWorkflowRequest {
+  // Business input for the workflow.
+  string input_data = 1;
+}
+
+// Response after initiating a workflow.
+message StartWorkflowResponse {
+  // Unique workflow identifier.
+  string workflow_id = 1;
+  // The run identifier assigned by Temporal.
+  string run_id = 2;
+}
+
+// Request to get the status of a workflow.
+message GetWorkflowStatusRequest {
+  // The workflow identifier returned on start.
+  string workflow_id = 1;
+}
+
+// Enumerates possible workflow statuses.
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNKNOWN_UNSPECIFIED = 0;
+  WORKFLOW_STATUS_RUNNING = 1;
+  WORKFLOW_STATUS_COMPLETED = 2;
+  WORKFLOW_STATUS_FAILED = 3;
+  WORKFLOW_STATUS_CANCELED = 4;
+}
+
+// Response with the current status and, if available, result or error.
+message GetWorkflowStatusResponse {
+  WorkflowStatus status = 1;
+  // If the workflow has completed successfully.
+  string result = 2;
+  // If the workflow failed.
+  string error = 3;
+}
+
+// The RPC service definition.
+service WorkflowService {
+  // Starts a Temporal workflow asynchronously.
+  rpc StartWorkflow (StartWorkflowRequest) returns (StartWorkflowResponse);
+  // Queries the current state of a workflow.
+  rpc GetWorkflowStatus (GetWorkflowStatusRequest) returns (GetWorkflowStatusResponse);
+}

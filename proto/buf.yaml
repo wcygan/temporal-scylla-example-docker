@@ -1,0 +1,8 @@
+version: v1
+name: buf.build/wcygan/temporal-scylla-example
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - STANDARD

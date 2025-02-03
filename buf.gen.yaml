@@ -1,0 +1,21 @@
+# Commands:
+#   buf lint proto
+#   buf push proto
+version: v2
+modules:
+  - path: proto
+    name: buf.build/wcygan/temporal-scylla-example
+managed:
+  enabled: true
+  override:
+      - file_option: go_package_prefix
+        value: github.com/wcygan/temporal-scylla-example/generated/go
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+    opt: paths=source_relative
+  - remote: buf.build/connectrpc/go
+    out: gen
+    opt: paths=source_relative
+inputs:
+  - directory: proto

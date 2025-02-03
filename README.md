@@ -5,6 +5,25 @@ docker-compose up
 open http://localhost:8080
 ```
 
+```bash
+grpcurl -plaintext -d '{
+  "inputData": "foobar"
+}' localhost:8081 workflow.v1.WorkflowService.StartWorkflow
+{
+  "workflow_id": "workflow-6dad30bd-94e0-439a-8357-ebecb0dedcb2",
+  "run_id": "0bf123c0-e54f-4a34-a8c1-9fb9e1d26209"
+}
+
+grpcurl -plaintext -d '{
+  "workflowId": "workflow-6dad30bd-94e0-439a-8357-ebecb0dedcb2"
+}' localhost:8081 workflow.v1.WorkflowService.GetWorkflowStatus
+{
+  "status": "WORKFLOW_STATUS_COMPLETED",
+  "result": "processed: foobar",
+  "error": ""
+}
+```
+
 This guide provides a step-by-step walkthrough for setting up a proof of concept that integrates Temporal with ScyllaDB, using ConnectRPC and Go to implement a complex workflow system.
 
 ## Overview

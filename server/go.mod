@@ -5,12 +5,15 @@ go 1.23.5
 require (
 	buf.build/gen/go/wcygan/temporal-scylla-example/connectrpc/go v1.18.1-20250203055709-598c0a16ffd7.1
 	buf.build/gen/go/wcygan/temporal-scylla-example/protocolbuffers/go v1.36.4-20250203055709-598c0a16ffd7.1
+	connectrpc.com/connect v1.18.1
+	connectrpc.com/grpchealth v1.3.0
+	connectrpc.com/grpcreflect v1.3.0
 	github.com/google/uuid v1.6.0
 	go.temporal.io/sdk v1.32.1
+	golang.org/x/net v0.28.0
 )
 
 require (
-	connectrpc.com/connect v1.18.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -25,7 +28,6 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	go.temporal.io/api v1.43.0 // indirect
 	golang.org/x/exp v0.0.0-20231127185646-65229373498e // indirect
-	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.24.0 // indirect
 	golang.org/x/text v0.17.0 // indirect

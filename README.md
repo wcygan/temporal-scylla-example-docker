@@ -26,6 +26,25 @@ brew install grpcui
 brew install cassandra
 ```
 
+### Using `test.sh`
+
+The script [test.sh](./test.sh) will start the workflow, poll the status, and print the final result.
+
+```bash
+./test.sh
+2025-02-03T07:05:44Z - Starting workflow...
+2025-02-03T07:05:44Z - Workflow started with ID: workflow-075a2cf6-19ca-4e2e-ac73-45576011fb72
+2025-02-03T07:05:44Z - Workflow status: WORKFLOW_STATUS_RUNNING
+2025-02-03T07:05:44Z - Workflow status: WORKFLOW_STATUS_RUNNING
+2025-02-03T07:05:45Z - Workflow status: WORKFLOW_STATUS_RUNNING
+2025-02-03T07:05:45Z - Workflow status: WORKFLOW_STATUS_RUNNING
+2025-02-03T07:05:45Z - Workflow status: WORKFLOW_STATUS_RUNNING
+2025-02-03T07:05:46Z - Workflow status: WORKFLOW_STATUS_RUNNING
+2025-02-03T07:05:46Z - Workflow status: WORKFLOW_STATUS_COMPLETED
+2025-02-03T07:05:46Z - Workflow completed successfully with result: validated: foobar -> processed -> finalized
+✅ Successfully observed RUNNING state before completion
+```
+
 ### Using grpcurl
 
 List available services:

@@ -11,6 +11,7 @@ import (
 	"connectrpc.com/grpchealth"
 	"connectrpc.com/grpcreflect"
 	"github.com/google/uuid"
+	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -65,26 +66,98 @@ func (s *workflowServiceServer) StartWorkflow(ctx context.Context, req *connect.
 
 // GetWorkflowStatus checks the workflow's completion status and returns the result.
 func (s *workflowServiceServer) GetWorkflowStatus(ctx context.Context, req *connect.Request[workflowv1pb.GetWorkflowStatusRequest]) (*connect.Response[workflowv1pb.GetWorkflowStatusResponse], error) {
+	// Get workflow handle
 	workflowHandle := temporalClient.GetWorkflow(ctx, req.Msg.WorkflowId, "")
 
-	var result string
-	err := workflowHandle.Get(ctx, &result)
+	// Get workflow execution details
+	desc, err := temporalClient.DescribeWorkflowExecution(ctx, req.Msg.WorkflowId, "")
 	if err != nil {
-		// The workflow might still be running.
+		return nil, fmt.Errorf("failed to describe workflow: %w", err)
+	}
+
+	status := desc.WorkflowExecutionInfo.Status
+	if status == enums.WORKFLOW_EXECUTION_STATUS_RUNNING {
 		return connect.NewResponse(&workflowv1pb.GetWorkflowStatusResponse{
 			Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_RUNNING,
 		}), nil
 	}
 
+	if status == enums.WORKFLOW_EXECUTION_STATUS_COMPLETED {
+		var result string
+		err := workflowHandle.Get(ctx, &result)
+		if err != nil {
+			return connect.NewResponse(&workflowv1pb.GetWorkflowStatusResponse{
+				Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_FAILED,
+				Error:  err.Error(),
+			}), nil
+		}
+		return connect.NewResponse(&workflowv1pb.GetWorkflowStatusResponse{
+			Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_COMPLETED,
+			Result: result,
+		}), nil
+	}
+
+	// Handle other statuses (failed, canceled, etc.)
 	return connect.NewResponse(&workflowv1pb.GetWorkflowStatusResponse{
-		Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_COMPLETED,
-		Result: result,
+		Status: workflowv1pb.WorkflowStatus_WORKFLOW_STATUS_FAILED,
+		Error:  fmt.Sprintf("workflow ended with status: %v", status),
 	}), nil
 }
 
-// DataProcessingWorkflow is a placeholder for your Temporal workflow.
+// DataProcessingWorkflow is now a multi-step workflow that calls three activities sequentially.
 func DataProcessingWorkflow(ctx workflow.Context, input string) (string, error) {
-	return "processed: " + input, nil
+	// Define activity options with a valid timeout.
+	activityOpts := workflow.ActivityOptions{
+		StartToCloseTimeout: time.Second * 10,
+		// Optionally, you can also specify ScheduleToCloseTimeout:
+		// ScheduleToCloseTimeout: time.Minute,
+	}
+	ctx = workflow.WithActivityOptions(ctx, activityOpts)
+
+	// Step 1: Validate Input
+	var validated string
+	err := workflow.ExecuteActivity(ctx, ValidateInputActivity, input).Get(ctx, &validated)
+	if err != nil {
+		return "", err
+	}
+
+	// Step 2: Process Data
+	var processed string
+	err = workflow.ExecuteActivity(ctx, ProcessDataActivity, validated).Get(ctx, &processed)
+	if err != nil {
+		return "", err
+	}
+
+	// Step 3: Finalize Workflow
+	var finalized string
+	err = workflow.ExecuteActivity(ctx, FinalizeWorkflowActivity, processed).Get(ctx, &finalized)
+	if err != nil {
+		return "", err
+	}
+
+	return finalized, nil
+}
+
+// ValidateInputActivity simulates input validation.
+func ValidateInputActivity(ctx context.Context, input string) (string, error) {
+	// Sleep for 0.5 seconds to simulate processing time.
+	time.Sleep(500 * time.Millisecond)
+	// For example, add a prefix to indicate validation.
+	return "validated: " + input, nil
+}
+
+// ProcessDataActivity simulates the core processing of data.
+func ProcessDataActivity(ctx context.Context, validatedInput string) (string, error) {
+	time.Sleep(500 * time.Millisecond)
+	// Append a processing message.
+	return validatedInput + " -> processed", nil
+}
+
+// FinalizeWorkflowActivity simulates finalizing the workflow.
+func FinalizeWorkflowActivity(ctx context.Context, processedData string) (string, error) {
+	time.Sleep(500 * time.Millisecond)
+	// Append a finalization message.
+	return processedData + " -> finalized", nil
 }
 
 // loggingInterceptor logs incoming requests.
@@ -132,7 +205,12 @@ func main() {
 
 	// Set up Temporal worker.
 	workerInstance := worker.New(temporalClient, "data-processing-task-queue", worker.Options{})
+	// Register workflow and activities.
 	workerInstance.RegisterWorkflow(DataProcessingWorkflow)
+	workerInstance.RegisterActivity(ValidateInputActivity)
+	workerInstance.RegisterActivity(ProcessDataActivity)
+	workerInstance.RegisterActivity(FinalizeWorkflowActivity)
+
 	go func() {
 		err := workerInstance.Run(worker.InterruptCh())
 		if err != nil {
